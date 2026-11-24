@@ -1,0 +1,53 @@
+name: build-and-deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-freellmapi
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push image
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/freellmapi"
+          docker build -f Dockerfile -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      - name: Join tailnet (ephemeral, tag:ci)
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Deploy to cluster
+        env:
+          KUBECONFIG_CI: ${{ secrets.KUBECONFIG_CI }}
+        run: |
+          printf '%s' "$KUBECONFIG_CI" > "$RUNNER_TEMP/kubeconfig"
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          helm upgrade --install llm deploy/chart -n llm \
+            --set image.repository="ghcr.io/${{ github.repository_owner }}/freellmapi" \
+            --set image.tag="${{ github.sha }}" \
+            --set host="${{ vars.LLM_HOST }}" \
+            --wait --timeout 10m
+          rm -f "$RUNNER_TEMP/kubeconfig"

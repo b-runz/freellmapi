@@ -1,0 +1,17 @@
+# Install: helm upgrade --install llm deploy/chart -n llm
+# Secret llm-secrets must exist first: ENCRYPTION_KEY (64 hex chars).
+# Secret ghcr-pull must exist if the image package is private.
+
+image:
+  repository: ghcr.io/owner/freellmapi   # overridden by the workflow
+  tag: latest
+
+pullSecretName: ghcr-pull
+host: ""            # set by the workflow from the LLM_HOST repository variable
+storage: 2Gi
+storageClass: local-path
+secretName: llm-secrets
+
+resources:
+  requests: { memory: 128Mi, cpu: 50m }
+  limits:   { memory: 512Mi }
